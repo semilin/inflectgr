@@ -14,7 +14,7 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-#[derive(Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub enum Number {
     #[default]
     Singular,
@@ -76,7 +76,7 @@ pub enum Voice {
     Passive,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum Person {
     #[default]
     First,
@@ -90,12 +90,18 @@ impl Person {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum Tense {
     #[default]
     Present,
     Imperfect,
     Future,
+}
+
+impl Tense {
+    pub const fn all() -> [Tense; 3] {
+        [Tense::Present, Tense::Imperfect, Tense::Future]
+    }
 }
 
 #[derive(Default)]
@@ -113,15 +119,15 @@ pub trait Verb {
 
 #[derive(Debug, Clone)]
 pub enum StemHead {
-    Consonant(char),
-    Vowel(char),
+    Consonant(String),
+    Vowel(String),
 }
 
 impl StemHead {
-    pub fn char(self) -> char {
+    pub fn as_string(self) -> String {
         match self {
-            StemHead::Consonant(c) => c,
-            StemHead::Vowel(c) => c,
+            StemHead::Consonant(s) => s,
+            StemHead::Vowel(s) => s,
         }
     }
 }
@@ -144,15 +150,15 @@ impl Stem {
         let first = stem.chars().next().ok_or(Error::InvalidStem)?;
         let mut dec = first.nfd();
         let head = match dec.any(is_vowel) {
-            true => StemHead::Vowel(first),
-            false => StemHead::Consonant(first),
+            true => StemHead::Vowel(first.to_string()),
+            false => StemHead::Consonant(first.to_string()),
         };
         let tail: String = stem.chars().skip(1).collect();
         Ok(Stem { head, tail })
     }
 
     pub fn to_string(self) -> String {
-        format!("{}{}", self.head.char(), self.tail)
+        format!("{}{}", self.head.as_string(), self.tail)
     }
 
     pub fn future_from_present(present: Stem) -> Result<Self, Error> {
@@ -181,14 +187,30 @@ impl Stem {
 pub struct ThematicVerb {
     present: Stem,
     future: Stem,
+    augment: String,
 }
 
 impl ThematicVerb {
     pub fn new(present: Stem) -> Result<Self, Error> {
         Ok(Self {
             present: present.clone(),
-            future: Stem::future_from_present(present)?,
+            future: Stem::future_from_present(present.clone())?,
+            augment: ThematicVerb::augment(present.head)
         })
+    }
+    pub fn augment(head: StemHead) -> String {
+        match head {
+            StemHead::Consonant(c) => "ε".to_string() + &c,
+            StemHead::Vowel(e) => match e.as_str() {
+                "α" | "ε" => "η",
+                "ι" => "ῑ",
+                "ο" => "ω",
+                "υ" => "ῡ",
+                "αι" | "ᾳ" => "ῃ",
+                "οι" => "ῳ",
+                _ => panic!()
+            }.to_string()
+        }
     }
     pub fn ending(con: ConjugationProduct) -> String {
         match con.mood {
@@ -234,7 +256,7 @@ impl Verb for ThematicVerb {
     fn conjugated(self, con: ConjugationProduct) -> String {
         (match con.tense {
             Tense::Present => self.present.to_string(),
-            Tense::Imperfect => todo!().to_string(),
+            Tense::Imperfect => self.augment + &self.present.tail,
             Tense::Future => self.future.to_string(),
         }) + &ThematicVerb::ending(con)
     }

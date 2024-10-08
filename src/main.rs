@@ -2,15 +2,20 @@ use inflectgr::{ConjugationProduct, Error, Number, Person, Stem, Tense, Thematic
 
 fn main() -> Result<(), Error> {
     let ago = ThematicVerb::new(Stem::new("αγ".to_string())?)?;
-    for person in Person::all() {
+    for tense in Tense::all() {
         for number in [Number::Singular, Number::Plural] {
-            let conjugated = ago.clone().conjugated(ConjugationProduct {
-                person,
-                number,
-                ..Default::default()
-            });
-            println!("{conjugated}");
+            for person in Person::all() {
+                println!("{tense:?} {person:?} {number:?}");
+                let conjugated = ago.clone().conjugated(ConjugationProduct {
+                    person,
+                    number,
+                    tense,
+                    ..Default::default()
+                });
+                println!("{conjugated}");
+            }
         }
     }
+
     Ok(())
 }
