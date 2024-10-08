@@ -68,12 +68,18 @@ pub enum Mood {
     Optative,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum Voice {
     #[default]
     Active,
     Middle,
     Passive,
+}
+
+impl Voice {
+    pub const fn all() -> [Voice; 3] {
+        [Voice::Active, Voice::Middle, Voice::Passive]
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -195,7 +201,7 @@ impl ThematicVerb {
         Ok(Self {
             present: present.clone(),
             future: Stem::future_from_present(present.clone())?,
-            augment: ThematicVerb::augment(present.head)
+            augment: ThematicVerb::augment(present.head),
         })
     }
     pub fn augment(head: StemHead) -> String {
@@ -208,8 +214,9 @@ impl ThematicVerb {
                 "υ" => "ῡ",
                 "αι" | "ᾳ" => "ῃ",
                 "οι" => "ῳ",
-                _ => panic!()
-            }.to_string()
+                _ => panic!(),
+            }
+            .to_string(),
         }
     }
     pub fn ending(con: ConjugationProduct) -> String {
@@ -240,6 +247,34 @@ impl ThematicVerb {
                             Person::First => "ομεν",
                             Person::Second => "ετε",
                             Person::Third => "ον",
+                        },
+                    },
+                },
+                Voice::Middle | Voice::Passive => match con.tense {
+                    Tense::Present | Tense::Future => match con.number {
+                        Number::Singular => match con.person {
+                            Person::First => "ομαι",
+                            Person::Second => "ει",
+                            Person::Third => "εται",
+                        },
+                        Number::Dual => todo!(),
+                        Number::Plural => match con.person {
+                            Person::First => "ομεθα",
+                            Person::Second => "εστε",
+                            Person::Third => "ονται",
+                        },
+                    },
+                    Tense::Imperfect => match con.number {
+                        Number::Singular => match con.person {
+                            Person::First => "ομην",
+                            Person::Second => "ου",
+                            Person::Third => "ετο",
+                        },
+                        Number::Dual => todo!(),
+                        Number::Plural => match con.person {
+                            Person::First => "ομεθα",
+                            Person::Second => "εσθε",
+                            Person::Third => "οντο",
                         },
                     },
                 },
