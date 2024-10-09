@@ -1,5 +1,6 @@
 use inflectgr::{
-    ConjugationProduct, Error, Number, Person, Stem, Tense, ThematicVerb, Verb, Voice,
+    ConjugationProduct, Error, InfinitiveProduct, Number, Person, Stem, Tense, ThematicVerb, Verb,
+    Voice,
 };
 
 fn main() -> Result<(), Error> {
@@ -22,6 +23,10 @@ fn main() -> Result<(), Error> {
             }
         }
     }
+    println!(
+        "Active Infinitive: {}",
+        ago.clone().infinitive(InfinitiveProduct::default())
+    );
 
     Ok(())
 }

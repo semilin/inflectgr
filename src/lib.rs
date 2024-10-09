@@ -119,8 +119,15 @@ pub struct ConjugationProduct {
     pub tense: Tense,
 }
 
+#[derive(Default)]
+pub struct InfinitiveProduct {
+    pub voice: Voice,
+    pub tense: Tense,
+}
+
 pub trait Verb {
     fn conjugated(self, con: ConjugationProduct) -> String;
+    fn infinitive(self, inf: InfinitiveProduct) -> String;
 }
 
 #[derive(Debug, Clone)]
@@ -278,7 +285,6 @@ impl ThematicVerb {
                         },
                     },
                 },
-                _ => todo!(),
             },
 
             _ => todo!(),
@@ -294,6 +300,24 @@ impl Verb for ThematicVerb {
             Tense::Imperfect => self.augment + &self.present.tail,
             Tense::Future => self.future.to_string(),
         }) + &ThematicVerb::ending(con)
+    }
+    fn infinitive(self, inf: InfinitiveProduct) -> String {
+        match inf.voice {
+            Voice::Active => match inf.tense {
+                Tense::Present => self.present.to_string() + "ειν",
+                Tense::Future => self.future.to_string() + "ειν",
+                _ => todo!(),
+            },
+            Voice::Middle => match inf.tense {
+                Tense::Present => self.present.to_string() + "εσθαι",
+                Tense::Future => self.future.to_string() + "εσθαι",
+                _ => todo!(),
+            },
+            Voice::Passive => match inf.tense {
+                Tense::Present => self.present.to_string() + "εσθαι",
+                _ => todo!(),
+            },
+        }
     }
 }
 
