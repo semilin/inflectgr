@@ -272,7 +272,9 @@ fn syllabify_general(s: &str, full: bool) -> Result<Vec<Syllable>, Error> {
         .filter(|w| w.len() == 2)
         .map(|w| [fundamental(w[0]), fundamental(w[1])])
         .enumerate()
-        .filter(|(i, [a, b])| (!full || *i >= vowel_prefix) && *i < len-2 && is_syllable_split(*a, *b))
+        .filter(|(i, [a, b])| {
+            (!full || *i >= vowel_prefix) && *i < len - 2 && is_syllable_split(*a, *b)
+        })
         .map(|(i, _)| i)
         .collect();
 
@@ -318,10 +320,9 @@ fn augmented_head(augment: Augment, head: StemHead) -> StemHead {
             Syllable::Long(s) => Syllable::Long(s + &head.to_string()),
         }),
         Augment::Temporal(s) => StemHead::Vowel({
-            let str = s.to_string();
-            Syllable::Long(
-                s.to_string() + &str.chars().skip(vowel_prefix_len(&str)).collect::<String>(),
-            )
+            let head_s = head.syllable().to_string();
+            let cons: String = head_s.chars().skip(vowel_prefix_len(&head_s)).collect();
+            Syllable::Long(s.to_string() + &cons)
         }),
     }
 }
@@ -349,8 +350,6 @@ impl Stem {
     pub fn new(stem: String) -> Result<Self, Error> {
         let syllables = syllabify_word(&stem)?;
 
-        println!("{:?}", syllables);
-
         let first = syllables[0].clone().to_string();
         let tail = &syllables[1..];
 
@@ -373,8 +372,8 @@ impl Stem {
         };
         let original_long = matches!(end_syl, Syllable::Long(_));
         let end = end_syl.to_string();
-        let last = end.chars().last().ok_or(Error::InvalidStem)?;
-        let precedent: String = end.chars().take(len.saturating_sub(4)).collect();
+        let (last_i, last) = end.chars().enumerate().last().ok_or(Error::InvalidStem)?;
+        let precedent: String = end.chars().take(last_i).collect();
         let (future, long) = match last {
             'κ' | 'χ' | 'γ' => (precedent + "ξ", true),
             'π' | 'β' | 'φ' => (precedent + "ψ", true),
