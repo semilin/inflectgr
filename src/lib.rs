@@ -14,6 +14,50 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+#[derive(Debug, Clone)]
+pub enum Syllable {
+    Short(String),
+    Long(String),
+}
+
+impl fmt::Display for Syllable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Syllable::Short(s) => s,
+                Syllable::Long(s) => s,
+            }
+        )
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AccentKind {
+    Acute,
+    Grave,
+    Circumflex,
+}
+
+#[derive(Debug, Clone)]
+pub struct WordSeq {
+    pub syls: Vec<Syllable>,
+    accent_kind: AccentKind,
+    accent_pos: usize,
+}
+
+impl WordSeq {
+    pub fn from_verb(mut syls: Vec<Syllable>, ending: Vec<Syllable>) -> Self {
+        syls.extend(ending);
+        WordSeq {
+            syls,
+            accent_kind: AccentKind::Acute,
+            accent_pos: 0,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, Default)]
 pub enum Number {
     #[default]
@@ -37,9 +81,8 @@ pub enum Case {
 }
 
 pub enum Declension {
-    E,
-    Os,
-    On,
+    First,
+    Second,
 }
 
 pub enum Gender {
@@ -53,10 +96,26 @@ pub struct DeclensionProduct {
     pub case: Case,
 }
 
-pub trait Noun {
-    fn stem(&self) -> &str;
-    fn gender(&self) -> Gender;
-    fn declined(self, dec: DeclensionProduct) -> String;
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum NomSing {
+    Os,
+    E,
+    A,
+    Es,
+    As,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum GenSing {
+    Es,
+    As,
+    Ou,
+}
+
+struct Noun {
+    stem: WordSeq,
+    nom_sing: NomSing,
+    gen_sing: GenSing,
 }
 
 #[derive(Default)]
@@ -126,18 +185,24 @@ pub struct InfinitiveProduct {
 }
 
 pub trait Verb {
-    fn conjugated(self, con: ConjugationProduct) -> String;
-    fn infinitive(self, inf: InfinitiveProduct) -> String;
+    fn conjugated(self, con: ConjugationProduct) -> WordSeq;
+    fn infinitive(self, inf: InfinitiveProduct) -> WordSeq;
 }
 
 #[derive(Debug, Clone)]
 pub enum StemHead {
-    Consonant(String),
-    Vowel(String),
+    Consonant(Syllable),
+    Vowel(Syllable),
+}
+
+impl fmt::Display for StemHead {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.clone().syllable())
+    }
 }
 
 impl StemHead {
-    pub fn as_string(self) -> String {
+    pub fn syllable(self) -> Syllable {
         match self {
             StemHead::Consonant(s) => s,
             StemHead::Vowel(s) => s,
@@ -148,51 +213,204 @@ impl StemHead {
 #[derive(Debug, Clone)]
 pub struct Stem {
     head: StemHead,
-    tail: String,
+    tail: Vec<Syllable>,
+}
+
+impl Stem {
+    pub fn composite(self) -> Vec<Syllable> {
+        let mut v = vec![self.head.syllable()];
+        v.extend(self.tail);
+        v
+    }
+}
+
+fn is_greek_letter(c: char) -> bool {
+    matches!(c, 'α'..'ω')
 }
 
 fn is_vowel(c: char) -> bool {
-    match c {
-        'α' | 'ε' | 'ι' | 'η' | 'ο' | 'ω' | 'υ' => true,
-        _ => false,
+    matches!(c, 'α' | 'ε' | 'ι' | 'η' | 'ο' | 'ω' | 'υ')
+}
+
+fn has_vowel(c: char) -> bool {
+    c.nfd().any(is_vowel)
+}
+
+fn fundamental(c: char) -> char {
+    c.nfd().next().unwrap()
+}
+
+fn is_long(syl: &str) -> bool {
+    syl.chars().any(|c| c.nfd().any(|c| matches!(c, 'ω' | 'η')))
+        || syl.chars().filter(|c| has_vowel(*c)).count() > 1
+}
+
+fn is_syllable_split(a: char, b: char) -> bool {
+    match (is_vowel(a), is_vowel(b)) {
+        (true, true) => match (a, b) {
+            ('ε', 'ι') | ('α', 'ι') | ('ε', 'υ') | ('ο', 'υ') | ('ο', 'ι') | ('α', 'υ') => {
+                false
+            }
+            _ => true,
+        },
+        (true, false) => true,
+        (false, true) => false,
+        (false, false) => match (a, b) {
+            ('σ', 'τ') => false,
+            _ => true,
+        },
+    }
+}
+
+fn syllabify_general(s: &str, full: bool) -> Result<Vec<Syllable>, Error> {
+    let binding = s.chars().collect::<Vec<char>>();
+    let chars: &[char] = binding.as_slice();
+    let vowel_prefix = vowel_prefix_len(s);
+    let len = chars.len();
+    let splits: Vec<usize> = chars
+        .windows(2)
+        .filter(|w| w.len() == 2)
+        .map(|w| [fundamental(w[0]), fundamental(w[1])])
+        .enumerate()
+        .filter(|(i, [a, b])| (!full || *i >= vowel_prefix) && *i < len-2 && is_syllable_split(*a, *b))
+        .map(|(i, _)| i)
+        .collect();
+
+    let mut syls: Vec<Syllable> = Vec::new();
+    let mut ns = String::new();
+    for (i, c) in chars.iter().enumerate() {
+        ns.push(*c);
+        if splits.contains(&i) {
+            syls.push(match is_long(&ns) {
+                true => Syllable::Long(ns.clone()),
+                false => Syllable::Short(ns.clone()),
+            });
+            ns.clear();
+        }
+    }
+    if !ns.is_empty() {
+        let syl = match is_long(&ns) {
+            true => Syllable::Long(ns.to_owned()),
+            false => Syllable::Short(ns.to_owned()),
+        };
+        syls.push(syl);
+    }
+
+    Ok(syls)
+}
+
+fn syllabify(s: &str) -> Result<Vec<Syllable>, Error> {
+    syllabify_general(s, false)
+}
+
+fn syllabify_word(s: &str) -> Result<Vec<Syllable>, Error> {
+    syllabify_general(s, true)
+}
+
+fn vowel_prefix_len(s: &str) -> usize {
+    s.chars().take_while(|c| has_vowel(*c)).count()
+}
+
+fn augmented_head(augment: Augment, head: StemHead) -> StemHead {
+    match augment {
+        Augment::Syllabic(syl) => StemHead::Vowel(match syl {
+            Syllable::Short(s) => Syllable::Short(s + &head.to_string()),
+            Syllable::Long(s) => Syllable::Long(s + &head.to_string()),
+        }),
+        Augment::Temporal(s) => StemHead::Vowel({
+            let str = s.to_string();
+            Syllable::Long(
+                s.to_string() + &str.chars().skip(vowel_prefix_len(&str)).collect::<String>(),
+            )
+        }),
+    }
+}
+
+fn short_s(s: &str) -> Syllable {
+    Syllable::Short(s.to_string())
+}
+
+fn long_s(s: &str) -> Syllable {
+    Syllable::Long(s.to_string())
+}
+
+impl fmt::Display for Stem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            self.head,
+            self.tail.iter().map(|s| s.to_string()).collect::<String>()
+        )
     }
 }
 
 impl Stem {
     pub fn new(stem: String) -> Result<Self, Error> {
-        let first = stem.chars().next().ok_or(Error::InvalidStem)?;
-        let mut dec = first.nfd();
-        let head = match dec.any(is_vowel) {
-            true => StemHead::Vowel(first.to_string()),
-            false => StemHead::Consonant(first.to_string()),
-        };
-        let tail: String = stem.chars().skip(1).collect();
-        Ok(Stem { head, tail })
-    }
+        let syllables = syllabify_word(&stem)?;
 
-    pub fn to_string(self) -> String {
-        format!("{}{}", self.head.as_string(), self.tail)
+        println!("{:?}", syllables);
+
+        let first = syllables[0].clone().to_string();
+        let tail = &syllables[1..];
+
+        let head = match has_vowel(first.chars().next().ok_or(Error::InvalidStem)?) {
+            true => StemHead::Vowel(syllables[0].to_owned()),
+            false => StemHead::Consonant(syllables[0].to_owned()),
+        };
+
+        Ok(Stem {
+            head,
+            tail: tail.to_vec(),
+        })
     }
 
     pub fn future_from_present(present: Stem) -> Result<Self, Error> {
         let len = present.tail.len();
-        let last = present.tail.chars().last().ok_or(Error::InvalidStem)?;
-        let precedent: String = present
-            .tail
-            .chars()
-            .take(len.checked_sub(4).unwrap_or(0))
-            .collect();
-        let future = match last {
-            'κ' | 'χ' | 'γ' => precedent + "ξ",
-            'π' | 'β' | 'φ' => precedent + "ψ",
-            'τ' | 'δ' | 'θ' => precedent + "σ",
-            'α' | 'ε' | 'ι' | 'η' | 'ο' | 'ω' | 'υ' => precedent + "σ",
-            _ => format!("{}{}{}", precedent, last, "σ"),
+        let end_syl = match len {
+            0 => present.head.clone().syllable(),
+            _ => present.tail.iter().last().unwrap().clone(),
         };
-        Ok(Stem {
-            head: present.head,
-            tail: future,
-        })
+        let original_long = matches!(end_syl, Syllable::Long(_));
+        let end = end_syl.to_string();
+        let last = end.chars().last().ok_or(Error::InvalidStem)?;
+        let precedent: String = end.chars().take(len.saturating_sub(4)).collect();
+        let (future, long) = match last {
+            'κ' | 'χ' | 'γ' => (precedent + "ξ", true),
+            'π' | 'β' | 'φ' => (precedent + "ψ", true),
+            'τ' | 'δ' | 'θ' => (precedent + "σ", true),
+            'α' | 'ε' | 'ι' | 'η' | 'ο' | 'ω' | 'υ' => (precedent + "σ", false),
+            _ => (format!("{}{}{}", precedent, last, "σ"), false),
+        };
+        match len {
+            0 => {
+                let syl = match original_long || long {
+                    true => Syllable::Long(future),
+                    false => Syllable::Short(future),
+                };
+                let head = match present.head {
+                    StemHead::Consonant(_) => StemHead::Consonant(syl),
+                    StemHead::Vowel(_) => StemHead::Vowel(syl),
+                };
+                Ok(Stem {
+                    head,
+                    tail: present.tail,
+                })
+            }
+            _ => {
+                let len = len - 1;
+                let mut future_tail: Vec<Syllable> = present.tail.into_iter().take(len).collect();
+                future_tail.push(if original_long || long {
+                    Syllable::Long(future)
+                } else {
+                    Syllable::Short(future)
+                });
+                Ok(Stem {
+                    head: present.head,
+                    tail: future_tail,
+                })
+            }
+        }
     }
 }
 
@@ -200,88 +418,107 @@ impl Stem {
 pub struct ThematicVerb {
     present: Stem,
     future: Stem,
-    augment: String,
+    augment: Augment,
+}
+
+#[derive(Debug, Clone)]
+pub enum Augment {
+    Syllabic(Syllable),
+    Temporal(Syllable),
 }
 
 impl ThematicVerb {
     pub fn new(present: Stem) -> Result<Self, Error> {
         Ok(Self {
             present: present.clone(),
-            future: Stem::future_from_present(present.clone())?,
+            future: Stem::future_from_present(present.to_owned())?,
             augment: ThematicVerb::augment(present.head),
         })
     }
-    pub fn augment(head: StemHead) -> String {
+    pub fn augment(head: StemHead) -> Augment {
         match head {
-            StemHead::Consonant(c) => "ε".to_string() + &c,
-            StemHead::Vowel(e) => match e.as_str() {
-                "α" | "ε" => "η",
-                "ι" => "ῑ",
-                "ο" => "ω",
-                "υ" => "ῡ",
-                "αι" | "ᾳ" => "ῃ",
-                "οι" => "ῳ",
-                _ => panic!(),
+            StemHead::Consonant(_) => Augment::Syllabic(Syllable::Short("ε".to_string())),
+            StemHead::Vowel(e) => {
+                let s = e.to_string();
+                let vowel_prefix: String = s.chars().take(vowel_prefix_len(&s)).collect();
+                Augment::Temporal(Syllable::Long(
+                    match vowel_prefix.as_str() {
+                        "α" | "ε" => "η",
+                        "ι" => "ῑ",
+                        "ο" => "ω",
+                        "υ" => "ῡ",
+                        "αι" | "ᾳ" => "ῃ",
+                        "οι" => "ῳ",
+                        _ => panic!("{e} is not a valid starting vowel"),
+                    }
+                    .to_string(),
+                ))
             }
-            .to_string(),
         }
     }
-    pub fn ending(con: ConjugationProduct) -> String {
+    pub fn ending(con: ConjugationProduct) -> Vec<Syllable> {
+        use Syllable as S;
         match con.mood {
             Mood::Indicative => match con.voice {
                 Voice::Active => match con.tense {
                     Tense::Present | Tense::Future => match con.number {
-                        Number::Singular => match con.person {
-                            Person::First => "ω",
-                            Person::Second => "εις",
-                            Person::Third => "ει",
-                        },
+                        Number::Singular => vec![S::Long(
+                            match con.person {
+                                Person::First => "ω",
+                                Person::Second => "εις",
+                                Person::Third => "ει",
+                            }
+                            .to_string(),
+                        )],
                         Number::Dual => todo!(),
                         Number::Plural => match con.person {
-                            Person::First => "ομεν",
-                            Person::Second => "ετε",
-                            Person::Third => "ουσι",
+                            Person::First => syllabify("ομεν").unwrap(),
+                            Person::Second => syllabify("ετε").unwrap(),
+                            Person::Third => syllabify("ουσι").unwrap(),
                         },
                     },
                     Tense::Imperfect => match con.number {
-                        Number::Singular => match con.person {
-                            Person::First => "ον",
-                            Person::Second => "ες",
-                            Person::Third => "ε",
-                        },
+                        Number::Singular => vec![S::Short(
+                            match con.person {
+                                Person::First => "ον",
+                                Person::Second => "ες",
+                                Person::Third => "ε",
+                            }
+                            .to_string(),
+                        )],
                         Number::Dual => todo!(),
                         Number::Plural => match con.person {
-                            Person::First => "ομεν",
-                            Person::Second => "ετε",
-                            Person::Third => "ον",
+                            Person::First => syllabify("ομεν").unwrap(),
+                            Person::Second => syllabify("ετε").unwrap(),
+                            Person::Third => vec![short_s("ον")],
                         },
                     },
                 },
                 Voice::Middle | Voice::Passive => match con.tense {
                     Tense::Present | Tense::Future => match con.number {
                         Number::Singular => match con.person {
-                            Person::First => "ομαι",
-                            Person::Second => "ει",
-                            Person::Third => "εται",
+                            Person::First => syllabify("ομαι").unwrap(),
+                            Person::Second => vec![long_s("ει")],
+                            Person::Third => syllabify("εται").unwrap(),
                         },
                         Number::Dual => todo!(),
                         Number::Plural => match con.person {
-                            Person::First => "ομεθα",
-                            Person::Second => "εστε",
-                            Person::Third => "ονται",
+                            Person::First => syllabify("ομεθα").unwrap(),
+                            Person::Second => syllabify("εστε").unwrap(),
+                            Person::Third => syllabify("ονται").unwrap(),
                         },
                     },
                     Tense::Imperfect => match con.number {
                         Number::Singular => match con.person {
-                            Person::First => "ομην",
-                            Person::Second => "ου",
-                            Person::Third => "ετο",
+                            Person::First => syllabify("ομην").unwrap(),
+                            Person::Second => syllabify("ου").unwrap(),
+                            Person::Third => syllabify("ετο").unwrap(),
                         },
                         Number::Dual => todo!(),
                         Number::Plural => match con.person {
-                            Person::First => "ομεθα",
-                            Person::Second => "εσθε",
-                            Person::Third => "οντο",
+                            Person::First => syllabify("ομεθα").unwrap(),
+                            Person::Second => syllabify("εσθε").unwrap(),
+                            Person::Third => syllabify("οντο").unwrap(),
                         },
                     },
                 },
@@ -289,35 +526,42 @@ impl ThematicVerb {
 
             _ => todo!(),
         }
-        .to_string()
     }
 }
 
 impl Verb for ThematicVerb {
-    fn conjugated(self, con: ConjugationProduct) -> String {
-        (match con.tense {
-            Tense::Present => self.present.to_string(),
-            Tense::Imperfect => self.augment + &self.present.tail,
-            Tense::Future => self.future.to_string(),
-        }) + &ThematicVerb::ending(con)
+    fn conjugated(self, con: ConjugationProduct) -> WordSeq {
+        WordSeq::from_verb(
+            match con.tense {
+                Tense::Present => self.present.composite(),
+                Tense::Imperfect => Stem {
+                    head: augmented_head(self.augment, self.present.head),
+                    tail: self.present.tail,
+                }
+                .composite(),
+                Tense::Future => self.future.composite(),
+            },
+            ThematicVerb::ending(con),
+        )
     }
-    fn infinitive(self, inf: InfinitiveProduct) -> String {
-        match inf.voice {
+    fn infinitive(self, inf: InfinitiveProduct) -> WordSeq {
+        let (stem, ending) = match inf.voice {
             Voice::Active => match inf.tense {
-                Tense::Present => self.present.to_string() + "ειν",
-                Tense::Future => self.future.to_string() + "ειν",
+                Tense::Present => (self.present.composite(), vec![long_s("ειν")]),
+                Tense::Future => (self.future.composite(), vec![long_s("ειν")]),
                 _ => todo!(),
             },
             Voice::Middle => match inf.tense {
-                Tense::Present => self.present.to_string() + "εσθαι",
-                Tense::Future => self.future.to_string() + "εσθαι",
+                Tense::Present => (self.present.composite(), syllabify("εσθαι").unwrap()),
+                Tense::Future => (self.future.composite(), syllabify("εσθαι").unwrap()),
                 _ => todo!(),
             },
             Voice::Passive => match inf.tense {
-                Tense::Present => self.present.to_string() + "εσθαι",
+                Tense::Present => (self.present.composite(), syllabify("εσθαι").unwrap()),
                 _ => todo!(),
             },
-        }
+        };
+        WordSeq::from_verb(stem, ending)
     }
 }
 

@@ -18,13 +18,13 @@ fn main() -> Result<(), Error> {
                         voice,
                         ..Default::default()
                     });
-                    println!("    {person:?} {number:?}: {conjugated}");
+                    println!("    {person:?} {number:?}: {:?}", conjugated.syls);
                 }
             }
         }
     }
     println!(
-        "Active Infinitive: {}",
+        "Active Infinitive: {:?}",
         ago.clone().infinitive(InfinitiveProduct::default())
     );
 
