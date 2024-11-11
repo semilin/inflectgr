@@ -290,7 +290,7 @@ fn is_syllable_split(a: char, b: char) -> bool {
         ),
         (true, false) => true,
         (false, true) => false,
-        (false, false) => matches!((a, b), ('σ', 'τ')),
+        (false, false) => !matches!((a, b), ('σ', 'τ') | ('σ', 'θ')),
     }
 }
 
@@ -298,14 +298,19 @@ fn syllabify_general(s: &str, full: bool) -> Result<Vec<Syllable>, Error> {
     let binding = s.chars().collect::<Vec<char>>();
     let chars: &[char] = binding.as_slice();
     let vowel_prefix = vowel_prefix_len(s);
-    let len = chars.len();
+    let last_vowel = s
+        .chars()
+        .enumerate()
+        .filter(|(_, c)| has_vowel(*c))
+        .last()
+        .ok_or(Error::InvalidStem)?;
     let splits: Vec<usize> = chars
         .windows(2)
         .filter(|w| w.len() == 2)
         .map(|w| [fundamental(w[0]), fundamental(w[1])])
         .enumerate()
         .filter(|(i, [a, b])| {
-            (!full || *i >= vowel_prefix) && *i < len - 2 && is_syllable_split(*a, *b)
+            (!full || *i >= vowel_prefix) && *i != last_vowel.0 && is_syllable_split(*a, *b)
         })
         .map(|(i, _)| i)
         .collect();
@@ -349,8 +354,8 @@ fn augmented_head(augment: Augment, head: StemHead) -> StemHead {
     match augment {
         Augment::Syllabic(syl) => StemHead::Vowel(
             match syl {
-                Syllable::Short(s) => Syllable::Short(s + &head.to_string()),
-                Syllable::Long(s) => Syllable::Long(s + &head.to_string()),
+                Syllable::Short(s) => Syllable::Short(s),
+                Syllable::Long(s) => Syllable::Long(s),
             },
             Breathing::Smooth,
         ),
@@ -462,7 +467,7 @@ impl Stem {
             'κ' | 'χ' | 'γ' => (precedent + "ξ", true),
             'π' | 'β' | 'φ' => (precedent + "ψ", true),
             'τ' | 'δ' | 'θ' => (precedent + "σ", true),
-            'α' | 'ε' | 'ι' | 'η' | 'ο' | 'ω' | 'υ' => (precedent + "σ", false),
+            'α' | 'ε' | 'ι' | 'η' | 'ο' | 'ω' => (precedent + "σ", false),
             _ => (format!("{precedent}{last}σ"), false),
         };
         match len {
@@ -622,7 +627,12 @@ impl Verb for ThematicVerb {
             match con.tense {
                 Tense::Present => self.present,
                 Tense::Imperfect => Stem {
-                    head: augmented_head(self.augment, self.present.head),
+                    head: augmented_head(self.augment, self.present.head.clone()),
+                    tail: {
+                        let mut tail = vec![self.present.head.syllable()];
+                        tail.extend(self.present.tail);
+                        tail
+                    },
                     ..self.present
                 },
                 Tense::Future => self.future,
