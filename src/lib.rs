@@ -376,13 +376,7 @@ impl Stem {
         } else {
             tail.iter()
                 .enumerate()
-                .filter_map(|(i, s)| {
-                    let acc = str_accent(&s.to_string());
-                    match acc {
-                        Some(a) => Some((a, (StemHalf::Tail, i))),
-                        None => None,
-                    }
-                })
+                .filter_map(|(i, s)| str_accent(&s.to_string()).map(|a| (a, (StemHalf::Tail, i))))
                 .next()
         }
         .unwrap_or((AccentKind::Acute, (StemHalf::Head, 0)));
