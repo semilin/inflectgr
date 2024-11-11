@@ -33,6 +33,19 @@ impl fmt::Display for Syllable {
     }
 }
 
+fn fundamentalize_string(s: String) -> String {
+    s.chars().map(fundamental).collect()
+}
+
+impl Syllable {
+    pub fn fundamentalized(self) -> Self {
+        match self {
+            Syllable::Short(s) => Syllable::Short(fundamentalize_string(s)),
+            Syllable::Long(s) => Syllable::Long(fundamentalize_string(s)),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum AccentKind {
     Acute,
@@ -43,17 +56,26 @@ pub enum AccentKind {
 #[derive(Debug, Clone)]
 pub struct WordSeq {
     pub syls: Vec<Syllable>,
-    accent_kind: AccentKind,
-    accent_pos: usize,
+    pub accent_kind: AccentKind,
+    pub accent_pos: usize,
+    pub breathing: Breathing,
 }
 
 impl WordSeq {
-    pub fn from_verb(mut syls: Vec<Syllable>, ending: Vec<Syllable>) -> Self {
+    pub fn from_verb(stem: Stem, ending: Vec<Syllable>) -> Self {
+        let accent_kind = stem.accent;
+        let accent_pos = stem.accent_pos.1;
+        let breathing = match stem.head {
+            StemHead::Vowel(_, b) => b,
+            _ => Breathing::default(),
+        };
+        let mut syls = stem.composite();
         syls.extend(ending);
         WordSeq {
             syls,
-            accent_kind: AccentKind::Acute,
-            accent_pos: 0,
+            accent_kind,
+            accent_pos,
+            breathing,
         }
     }
 }
@@ -189,10 +211,17 @@ pub trait Verb {
     fn infinitive(self, inf: InfinitiveProduct) -> WordSeq;
 }
 
+#[derive(Default, Debug, Copy, Clone)]
+pub enum Breathing {
+    Rough,
+    #[default]
+    Smooth,
+}
+
 #[derive(Debug, Clone)]
 pub enum StemHead {
     Consonant(Syllable),
-    Vowel(Syllable),
+    Vowel(Syllable, Breathing),
 }
 
 impl fmt::Display for StemHead {
@@ -205,23 +234,23 @@ impl StemHead {
     pub fn syllable(self) -> Syllable {
         match self {
             StemHead::Consonant(s) => s,
-            StemHead::Vowel(s) => s,
+            StemHead::Vowel(s, _) => s,
         }
     }
 }
 
 #[derive(Debug, Copy, Clone)]
-enum StemHalf {
+pub enum StemHalf {
     Head,
     Tail,
 }
 
 #[derive(Debug, Clone)]
 pub struct Stem {
-    head: StemHead,
-    tail: Vec<Syllable>,
-    accent: AccentKind,
-    accent_pos: (StemHalf, usize),
+    pub head: StemHead,
+    pub tail: Vec<Syllable>,
+    pub accent: AccentKind,
+    pub accent_pos: (StemHalf, usize),
 }
 
 impl Stem {
@@ -318,15 +347,21 @@ fn vowel_prefix_len(s: &str) -> usize {
 
 fn augmented_head(augment: Augment, head: StemHead) -> StemHead {
     match augment {
-        Augment::Syllabic(syl) => StemHead::Vowel(match syl {
-            Syllable::Short(s) => Syllable::Short(s + &head.to_string()),
-            Syllable::Long(s) => Syllable::Long(s + &head.to_string()),
-        }),
-        Augment::Temporal(s) => StemHead::Vowel({
-            let head_s = head.syllable().to_string();
-            let cons: String = head_s.chars().skip(vowel_prefix_len(&head_s)).collect();
-            Syllable::Long(s.to_string() + &cons)
-        }),
+        Augment::Syllabic(syl) => StemHead::Vowel(
+            match syl {
+                Syllable::Short(s) => Syllable::Short(s + &head.to_string()),
+                Syllable::Long(s) => Syllable::Long(s + &head.to_string()),
+            },
+            Breathing::Smooth,
+        ),
+        Augment::Temporal(s, b) => StemHead::Vowel(
+            {
+                let head_s = head.syllable().to_string();
+                let cons: String = head_s.chars().skip(vowel_prefix_len(&head_s)).collect();
+                Syllable::Long(s.to_string() + &cons)
+            },
+            b,
+        ),
     }
 }
 
@@ -350,6 +385,20 @@ fn char_accent(c: char) -> Option<AccentKind> {
 fn str_accent(s: &str) -> Option<AccentKind> {
     s.chars()
         .filter_map(|c| c.nfd().filter_map(char_accent).next())
+        .next()
+}
+
+fn char_breathing(c: char) -> Option<Breathing> {
+    match c {
+        '\u{314}' => Some(Breathing::Rough),
+        '\u{313}' => Some(Breathing::Smooth),
+        _ => None,
+    }
+}
+
+fn str_breathing(s: &str) -> Option<Breathing> {
+    s.chars()
+        .filter_map(|c| c.nfd().filter_map(char_breathing).next())
         .next()
 }
 
@@ -381,14 +430,19 @@ impl Stem {
         }
         .unwrap_or((AccentKind::Acute, (StemHalf::Head, 0)));
 
+        let breathing = str_breathing(&first).unwrap_or_default();
+
+        let first_fundamental = syllables[0].to_owned().fundamentalized();
+        let tail_fundamental = tail.iter().map(|s| s.clone().fundamentalized()).collect();
+
         let head = match has_vowel(first.chars().next().ok_or(Error::InvalidStem)?) {
-            true => StemHead::Vowel(syllables[0].to_owned()),
-            false => StemHead::Consonant(syllables[0].to_owned()),
+            true => StemHead::Vowel(first_fundamental, breathing),
+            false => StemHead::Consonant(first_fundamental),
         };
 
         Ok(Stem {
             head,
-            tail: tail.to_vec(),
+            tail: tail_fundamental,
             accent,
             accent_pos,
         })
@@ -419,7 +473,7 @@ impl Stem {
                 };
                 let head = match present.head {
                     StemHead::Consonant(_) => StemHead::Consonant(syl),
-                    StemHead::Vowel(_) => StemHead::Vowel(syl),
+                    StemHead::Vowel(_, b) => StemHead::Vowel(syl, b),
                 };
                 Ok(Stem { head, ..present })
             }
@@ -450,7 +504,7 @@ pub struct ThematicVerb {
 #[derive(Debug, Clone)]
 pub enum Augment {
     Syllabic(Syllable),
-    Temporal(Syllable),
+    Temporal(Syllable, Breathing),
 }
 
 impl ThematicVerb {
@@ -464,25 +518,28 @@ impl ThematicVerb {
     pub fn augment(head: StemHead) -> Augment {
         match head {
             StemHead::Consonant(_) => Augment::Syllabic(Syllable::Short("ε".to_string())),
-            StemHead::Vowel(e) => {
+            StemHead::Vowel(e, b) => {
                 let s = e.to_string();
                 let vowel_prefix: String = s
                     .chars()
                     .map(fundamental)
                     .take(vowel_prefix_len(&s))
                     .collect();
-                Augment::Temporal(Syllable::Long(
-                    match vowel_prefix.as_str() {
-                        "α" | "ε" => "η",
-                        "ι" => "ῑ",
-                        "ο" => "ω",
-                        "υ" => "ῡ",
-                        "αι" | "ᾳ" => "ῃ",
-                        "οι" => "ῳ",
-                        _ => panic!("{e} is not a valid starting vowel"),
-                    }
-                    .to_string(),
-                ))
+                Augment::Temporal(
+                    Syllable::Long(
+                        match vowel_prefix.as_str() {
+                            "α" | "ε" => "η",
+                            "ι" => "ῑ",
+                            "ο" => "ω",
+                            "υ" => "ῡ",
+                            "αι" | "ᾳ" => "ῃ",
+                            "οι" => "ῳ",
+                            _ => panic!("{e} is not a valid starting vowel"),
+                        }
+                        .to_string(),
+                    ),
+                    b,
+                )
             }
         }
     }
@@ -563,13 +620,12 @@ impl Verb for ThematicVerb {
     fn conjugated(self, con: ConjugationProduct) -> WordSeq {
         WordSeq::from_verb(
             match con.tense {
-                Tense::Present => self.present.composite(),
+                Tense::Present => self.present,
                 Tense::Imperfect => Stem {
                     head: augmented_head(self.augment, self.present.head),
                     ..self.present
-                }
-                .composite(),
-                Tense::Future => self.future.composite(),
+                },
+                Tense::Future => self.future,
             },
             ThematicVerb::ending(con),
         )
@@ -577,17 +633,17 @@ impl Verb for ThematicVerb {
     fn infinitive(self, inf: InfinitiveProduct) -> WordSeq {
         let (stem, ending) = match inf.voice {
             Voice::Active => match inf.tense {
-                Tense::Present => (self.present.composite(), vec![long_s("ειν")]),
-                Tense::Future => (self.future.composite(), vec![long_s("ειν")]),
+                Tense::Present => (self.present, vec![long_s("ειν")]),
+                Tense::Future => (self.future, vec![long_s("ειν")]),
                 _ => todo!(),
             },
             Voice::Middle => match inf.tense {
-                Tense::Present => (self.present.composite(), syllabify("εσθαι").unwrap()),
-                Tense::Future => (self.future.composite(), syllabify("εσθαι").unwrap()),
+                Tense::Present => (self.present, syllabify("εσθαι").unwrap()),
+                Tense::Future => (self.future, syllabify("εσθαι").unwrap()),
                 _ => todo!(),
             },
             Voice::Passive => match inf.tense {
-                Tense::Present => (self.present.composite(), syllabify("εσθαι").unwrap()),
+                Tense::Present => (self.present, syllabify("εσθαι").unwrap()),
                 _ => todo!(),
             },
         };
