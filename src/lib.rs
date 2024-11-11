@@ -255,18 +255,13 @@ fn is_long(syl: &str) -> bool {
 
 fn is_syllable_split(a: char, b: char) -> bool {
     match (is_vowel(a), is_vowel(b)) {
-        (true, true) => match (a, b) {
-            ('ε', 'ι') | ('α', 'ι') | ('ε', 'υ') | ('ο', 'υ') | ('ο', 'ι') | ('α', 'υ') => {
-                false
-            }
-            _ => true,
-        },
+        (true, true) => !matches!(
+            (a, b),
+            ('ε', 'ι') | ('α', 'ι') | ('ε', 'υ') | ('ο', 'υ') | ('ο', 'ι') | ('α', 'υ')
+        ),
         (true, false) => true,
         (false, true) => false,
-        (false, false) => match (a, b) {
-            ('σ', 'τ') => false,
-            _ => true,
-        },
+        (false, false) => matches!((a, b), ('σ', 'τ')),
     }
 }
 
