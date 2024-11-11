@@ -379,15 +379,19 @@ impl Stem {
         let (accent, accent_pos) = if let Some(a) = str_accent(&first) {
             Some((a, (StemHalf::Head, 0)))
         } else {
-            tail.iter().enumerate().filter_map(|(i, s)| {
-                let acc = str_accent(&s.to_string());
-                match acc {
-                    Some(a) => Some((a, (StemHalf::Tail, i))),
-                    None => None,
-                }
-            }).next()
-        }.unwrap_or((AccentKind::Acute, (StemHalf::Head, 0)));
-        
+            tail.iter()
+                .enumerate()
+                .filter_map(|(i, s)| {
+                    let acc = str_accent(&s.to_string());
+                    match acc {
+                        Some(a) => Some((a, (StemHalf::Tail, i))),
+                        None => None,
+                    }
+                })
+                .next()
+        }
+        .unwrap_or((AccentKind::Acute, (StemHalf::Head, 0)));
+
         let head = match has_vowel(first.chars().next().ok_or(Error::InvalidStem)?) {
             true => StemHead::Vowel(syllables[0].to_owned()),
             false => StemHead::Consonant(syllables[0].to_owned()),
@@ -397,7 +401,7 @@ impl Stem {
             head,
             tail: tail.to_vec(),
             accent,
-            accent_pos
+            accent_pos,
         })
     }
 
@@ -428,10 +432,7 @@ impl Stem {
                     StemHead::Consonant(_) => StemHead::Consonant(syl),
                     StemHead::Vowel(_) => StemHead::Vowel(syl),
                 };
-                Ok(Stem {
-                    head,
-                    ..present
-                })
+                Ok(Stem { head, ..present })
             }
             _ => {
                 let len = len - 1;
