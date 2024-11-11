@@ -210,10 +210,18 @@ impl StemHead {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+enum StemHalf {
+    Head,
+    Tail,
+}
+
 #[derive(Debug, Clone)]
 pub struct Stem {
     head: StemHead,
     tail: Vec<Syllable>,
+    accent: AccentKind,
+    accent_pos: (StemHalf, usize),
 }
 
 impl Stem {
@@ -335,6 +343,21 @@ fn long_s(s: &str) -> Syllable {
     Syllable::Long(s.to_string())
 }
 
+fn char_accent(c: char) -> Option<AccentKind> {
+    match c {
+        '\u{301}' => Some(AccentKind::Acute),
+        '`' => Some(AccentKind::Grave),
+        '~' => Some(AccentKind::Circumflex),
+        _ => None,
+    }
+}
+
+fn str_accent(s: &str) -> Option<AccentKind> {
+    s.chars()
+        .filter_map(|c| c.nfd().filter_map(char_accent).next())
+        .next()
+}
+
 impl fmt::Display for Stem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -353,6 +376,18 @@ impl Stem {
         let first = syllables[0].clone().to_string();
         let tail = &syllables[1..];
 
+        let (accent, accent_pos) = if let Some(a) = str_accent(&first) {
+            Some((a, (StemHalf::Head, 0)))
+        } else {
+            tail.iter().enumerate().filter_map(|(i, s)| {
+                let acc = str_accent(&s.to_string());
+                match acc {
+                    Some(a) => Some((a, (StemHalf::Tail, i))),
+                    None => None,
+                }
+            }).next()
+        }.unwrap_or((AccentKind::Acute, (StemHalf::Head, 0)));
+        
         let head = match has_vowel(first.chars().next().ok_or(Error::InvalidStem)?) {
             true => StemHead::Vowel(syllables[0].to_owned()),
             false => StemHead::Consonant(syllables[0].to_owned()),
@@ -361,6 +396,8 @@ impl Stem {
         Ok(Stem {
             head,
             tail: tail.to_vec(),
+            accent,
+            accent_pos
         })
     }
 
@@ -379,7 +416,7 @@ impl Stem {
             'π' | 'β' | 'φ' => (precedent + "ψ", true),
             'τ' | 'δ' | 'θ' => (precedent + "σ", true),
             'α' | 'ε' | 'ι' | 'η' | 'ο' | 'ω' | 'υ' => (precedent + "σ", false),
-            _ => (format!("{}{}{}", precedent, last, "σ"), false),
+            _ => (format!("{precedent}{last}σ"), false),
         };
         match len {
             0 => {
@@ -393,7 +430,7 @@ impl Stem {
                 };
                 Ok(Stem {
                     head,
-                    tail: present.tail,
+                    ..present
                 })
             }
             _ => {
@@ -405,8 +442,8 @@ impl Stem {
                     Syllable::Short(future)
                 });
                 Ok(Stem {
-                    head: present.head,
                     tail: future_tail,
+                    ..present
                 })
             }
         }
@@ -439,7 +476,11 @@ impl ThematicVerb {
             StemHead::Consonant(_) => Augment::Syllabic(Syllable::Short("ε".to_string())),
             StemHead::Vowel(e) => {
                 let s = e.to_string();
-                let vowel_prefix: String = s.chars().take(vowel_prefix_len(&s)).collect();
+                let vowel_prefix: String = s
+                    .chars()
+                    .map(fundamental)
+                    .take(vowel_prefix_len(&s))
+                    .collect();
                 Augment::Temporal(Syllable::Long(
                     match vowel_prefix.as_str() {
                         "α" | "ε" => "η",
@@ -535,7 +576,7 @@ impl Verb for ThematicVerb {
                 Tense::Present => self.present.composite(),
                 Tense::Imperfect => Stem {
                     head: augmented_head(self.augment, self.present.head),
-                    tail: self.present.tail,
+                    ..self.present
                 }
                 .composite(),
                 Tense::Future => self.future.composite(),

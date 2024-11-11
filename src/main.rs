@@ -4,7 +4,7 @@ use inflectgr::{
 };
 
 fn main() -> Result<(), Error> {
-    let ago = ThematicVerb::new(Stem::new("αγ".to_string())?)?;
+    let ago = ThematicVerb::new(Stem::new("άγ".to_string())?)?;
     for tense in Tense::all() {
         println!("{tense:?}");
         for voice in [Voice::Active, Voice::Middle] {
